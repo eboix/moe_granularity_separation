@@ -25,13 +25,13 @@ class MLP(nn.Module):
 
 # Define MoE with Top-K (where each expert is an MLP)
 class MoE_TopK(nn.Module):
-    def __init__(self, input_dim, output_dim, num_experts, k, hidden_dim=32):
+    def __init__(self, input_dim, output_dim, num_experts, k, hidden_dim=32,bias=False):
         super().__init__()
         self.num_experts = num_experts
         self.k = k  # Number of selected experts
 
         # Gating network
-        self.gate = nn.Linear(input_dim, num_experts,bias=False)
+        self.gate = nn.Linear(input_dim, num_experts,bias=bias)
 
         self.expert_tally = nn.Parameter(torch.zeros(self.num_experts))
         self.expert_tally.requires_grad = False
@@ -120,11 +120,13 @@ def evaluate_zero(test_loader):
 
 import pickle
 from tqdm import tqdm
+import math
 def generate_datapoint(d,
                        k1,num_experts1,active_neurons1,
                        k2,num_experts2,active_neurons2,
                        num_epochs,lr,batch_size,
-                       trial):
+                       trial,
+                       bias=False):
     input_dim = d
     output_dim = d
     hidden_dim1 = active_neurons1 // k1
@@ -133,7 +135,11 @@ def generate_datapoint(d,
     active_neurons2 = hidden_dim2 * k2
     assert(hidden_dim1 * k1 == active_neurons1)
     assert(hidden_dim2 * k2 == active_neurons2)
-    filename = f'd{d}_{num_experts1}e{k1}a{active_neurons1}s_{num_experts2}e{k2}a{active_neurons2}s_lr{lr}_b{batch_size}_e{num_epochs}_trial{trial}.pkl'
+    if bias:
+        bias_str = '_bias'
+    else:
+        bias_str = ''
+    filename = f'd{d}_{num_experts1}e{k1}a{active_neurons1}s_{num_experts2}e{k2}a{active_neurons2}s{bias_str}_lr{lr}_b{batch_size}_e{num_epochs}_trial{trial}.pkl'
     experiment_filename = 'experiment_data/' + filename
     if not os.path.exists('experiment_data'):
         os.makedirs('experiment_data')
@@ -142,6 +148,7 @@ def generate_datapoint(d,
         data = pickle.load(open(experiment_filename, 'rb'))
         return data
     else:
+        # return {'train_losses': [-1], 'test_losses': [math.inf], 'base_losses': [1]}
         print(f'Generating teacher model with {k1} / {num_experts1} experts and {active_neurons1} active neurons')
         # Generate dataset using the teacher model
         teacher_model = MoE_TopK(input_dim, output_dim, num_experts1, k1, hidden_dim1).to(device)
@@ -149,7 +156,7 @@ def generate_datapoint(d,
 
         # Train MoE_TopK with cosine decay learning rate
         print(f'Training student model with {k2} / {num_experts2} experts and {active_neurons2} active neurons')
-        student_model = MoE_TopK(input_dim, output_dim, num_experts2, k2, hidden_dim2).to(device)
+        student_model = MoE_TopK(input_dim, output_dim, num_experts2, k2, hidden_dim2,bias=bias).to(device)
         base_optimizer = optim.AdamW([
             {'params': student_model.gate.parameters(), 'lr' : lr},  # Gate parameters
             {'params': student_model.experts.parameters(), 'lr' : lr}  # Expert parameters
@@ -187,6 +194,7 @@ def generate_datapoint(d,
         return data
 
 
+
 def main():
     parser = argparse.ArgumentParser(description="MoE and Teacher Experiment")
     parser.add_argument('--d', type=int, default=256, help='Input dimension')
@@ -200,6 +208,7 @@ def main():
     parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate')
     parser.add_argument('--batch_size', type=int, default=2048, help='Batch size')
     parser.add_argument('--trial', type=int, default=0, help='Trial number')
+    parser.add_argument('--bias', action='store_true', help='Use bias in the gating network')
     args = parser.parse_args()
     d = args.d
     k1 = args.k1
@@ -212,6 +221,7 @@ def main():
     lr = args.lr
     batch_size = args.batch_size
     trial = args.trial
+    bias = args.bias
     print(f'Input dimension: {d}')
     print(f'Number of experts for teacher model: {num_experts1}')
     print(f'Number of active neurons for teacher model: {active_neurons1}')
@@ -225,7 +235,7 @@ def main():
                             k1,num_experts1,active_neurons1,
                             k2,num_experts2,active_neurons2,
                             num_epochs,lr,batch_size,
-                            trial=trial)
+                            trial=trial,bias=bias)
     print(datum['test_losses'][-1])
     print(datum['base_losses'][-1])
 
