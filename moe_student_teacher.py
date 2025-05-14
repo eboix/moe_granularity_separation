@@ -4,7 +4,6 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 import os
 import argparse
-os.chdir('/u/eboix/moe_experiment')
 
 # Check for GPU
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
